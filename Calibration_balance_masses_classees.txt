@@ -17,14 +17,20 @@ HX711 balance;
 // Facteur trouvé à l’étalonnage
 
 float calibration_factor = -1175.31;  //  à remplacer par ta valeur trouvée
-float masse_corrige;
-
 // Exemple : ~ 1000 / lecture brute obtenue avec 1 kg étalon
+float masse_corrige;
+String um;
+String msg_topic;
+String Classe_EMT;
+
+
 
 //const char *mqtt_broker = "broker.hivemq.com"; 
-const char *mqtt_broker = "147.94.219.57"; // Identifiant du broker (Adresse IP)
+const char *mqtt_broker = "147.94.219.93"; // Identifiant du broker (Adresse IP)
 const char *topic = "masse corrigée"; // Nom du topic sur lequel les données seront envoyés.
-const char *topic_2 = "masse brut"; // Nom du topic sur lequel les données seront envoyés. 
+const char *topic_2 = "masse brut"; // Nom du topic sur lequel les données seront envoyés.
+const char *topic_3 = "classe_EMT"; // Nom du topic sur lequel les données seront envoyés.
+const char *topic_4 = "tare"; // Nom du topic sur lequel les données seront envoyés. 
 const char *mqtt_username = ""; // Identifiant dans le cas d'une liaison sécurisée
 const char *mqtt_password = ""; // Mdp dans le cas d'une liaison sécurisée
 const int mqtt_port = 1883; // Port : 1883 dans le cas d'une liaison non sécurisée et 8883 dans le cas d'une liaison cryptée
@@ -39,16 +45,56 @@ const char* ssid = "eduroam"; // eduroam SSID
 
 // Fonction réception du message MQTT 
 void callback(char *topic, byte *payload, unsigned int length) { 
-  Serial.print("Le message a été envoyé sur le topic : "); 
-  Serial.println(topic); 
-  Serial.print("Message:"); 
+  String msg;
   for (int i = 0; i < length; i++) { 
-    Serial.print((char) payload[i]); 
+    msg += (char)payload[i];
   } 
-  Serial.println(); 
-  Serial.println("-----------------------"); 
+
+  Serial.println("-----------------------");
+  Serial.print("Topic reçu : "); 
+  Serial.println(topic); 
+  Serial.print("Message reçu : "); 
+  Serial.println(msg); 
+  Serial.println("-----------------------");
+
+  String topicStr = String(topic);
+  msg.trim();  // Nettoie les espaces blancs, sauts de ligne éventuels
+
+  if (topicStr.equalsIgnoreCase("tare") && msg.equalsIgnoreCase("tare")) {
+    Serial.println("Tare demandée depuis Node-RED !");
+    unsigned long start = millis();
+    balance.tare();
+    unsigned long end = millis();
+    Serial.print("Tare effectué en ");
+    Serial.print(end - start);
+    Serial.println(" ms");
+    client.publish("Tar/confirmation", "Tare OK");
+  } else {
+    Serial.println("Message ignoré.");
+  }
 }
 
+
+void reconnect() {
+  // Boucle jusqu'à ce que la connexion soit rétablie
+  while (!client.connected()) {
+    Serial.print("Connexion au broker MQTT... ");
+    String client_id = "esp32-client-";
+    client_id += String(WiFi.macAddress());
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password)) {
+      Serial.println("Connecté !");
+      client.subscribe("tare");        // on se réabonne aux topics
+      client.subscribe("masse corrigée");
+      client.subscribe("masse brut");
+      client.subscribe("classe_EMT");
+    } else {
+      Serial.print("Échec, rc=");
+      Serial.print(client.state());
+      Serial.println(" nouvelle tentative dans 5s");
+      delay(5000);
+    }
+  }
+}
 
 void setup() {
 
@@ -94,81 +140,70 @@ void setup() {
       Serial.print(client.state()); 
       delay(2000); 
     } 
-  } 
+  }
+  client.subscribe(topic); // S'abonne au topic pour recevoir des messages
+  client.subscribe(topic_2); // S'abonne au topic pour recevoir des messages
+  client.subscribe(topic_3); // S'abonne au topic pour recevoir des messages
+  client.subscribe(topic_4); // S'abonne au topic pour recevoir des messages
 } 
 
 
 
+unsigned long previousMillis = 0;
+const long interval = 1000; // intervalle de mesure en ms
+
 void loop() {
+  if (!client.connected()) {
+    reconnect();
+  }
 
-  float masse = balance.get_units(10); // Moyenne sur 10 mesures
-  if (masse <= 0.09 && masse >= -0.09){
-    masse_corrige = 0;
-  }
-  if (masse <= 1.49 && masse >= 0.5){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.04 g");
-  }
-  if (masse <= 3.49 && masse >= 1.5){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.04 g");
-  }
-  if (masse <= 7.49 && masse >= 3.5){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.05 g");
-  }
-  if (masse <= 14.99 && masse >= 7.5){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.07 g");
-  }
-  if (masse <= 34.99 && masse >= 15){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.08 g");
-  }
-  if (masse <= 74.99 && masse >= 35){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.09 g");
-  }
-  if (masse <= 149.99 && masse >= 75){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.15 g");
-  }
-  if (masse <= 250 && masse >= 150){
-    masse_corrige = masse;
-    Serial.print("Masse corrigée : ");
-    Serial.print(masse_corrige, 2); // 2 décimales
-    Serial.println(" ± 0.29 g");
-  }
-  
+  client.loop();  // Toujours en premier : vérifie et traite les messages MQTT
 
-  Serial.print("Masse mesurée : ");
-  Serial.print(masse, 2); // 2 décimales
-  Serial.println(" g");
+  // Mesure toutes les 1s sans bloquer
+  unsigned long currentMillis = millis();
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
 
-  msg_topic = String(masse_corrige) + " ± 0.27";
-  client.publish(topic, msg_topic.c_str()); // Publication de la température sur le topic (envoi d'une chaîne de caractères)
-  client.subscribe(topic); // S'abonne au topic pour recevoir des messages
-  client.loop(); // Gère les messages MQTT (pour lire la valeur de la température sur le moniteur série de platformIO)
-  
-  client.publish(topic_2, String(masse).c_str()); // Publication de la température sur le topic (envoi d'une chaîne de caractères)
-  client.subscribe(topic_2); // S'abonne au topic pour recevoir des messages
-  client.loop(); // Gère les messages MQTT (pour lire la valeur de la température sur le moniteur série de platformIO)
+    float masse = balance.get_units(10); //  Ce code prend environ 1 seconde
+    String Classe_EMT = "";
+    String um = "";
+    masse_corrige = masse;
 
-  balance.power_down();			        // met le CAN en veille
-  delay(1000);
-  balance.power_up();
+    if (masse <= 0.09 && masse >= -0.09){
+      masse_corrige = masse;
+    } else if (masse <= 1.49 && masse >= 0.5){
+      um = "± 0.04 g";    // incertitude de mesure pour 1g
+      Classe_EMT = "Classe F2 : EMT = 0.3";     // Classe et EMT pour 1g
+    } else if (masse <= 3.49 && masse >= 1.5){
+      um = "± 0.04 g";    // incertitude de mesure pour 2g
+      Classe_EMT = "Classe F2 : EMT = 0.4";     // Classe et EMT pour 2g
+    } else if (masse <= 7.49 && masse >= 3.5){
+      um = "± 0.05 g";    // incertitude de mesure pour 5g
+      Classe_EMT = "Classe M1 : EMT = 1.5";     // Classe et EMT pour 5g
+    } else if (masse <= 14.99 && masse >= 7.5){
+      um = "± 0.07 g";    // incertitude de mesure pour 10g
+      Classe_EMT = "Classe M1 : EMT = 2";     // Classe et EMT pour 10g
+    } else if (masse <= 34.99 && masse >= 15){
+      um = "± 0.08 g";    // incertitude de mesure pour 20g
+      Classe_EMT = "Classe M2 : EMT = 6";     // Classe et EMT pour 20g
+    } else if (masse <= 74.99 && masse >= 35){
+      um = "± 0.09 g";    // incertitude de mesure pour 50g
+      Classe_EMT = "Classe M2 : EMT = 10";     // Classe et EMT pour 50g
+    } else if (masse <= 149.99 && masse >= 75){
+      um = "± 0.15 g";    // incertitude de mesure pour 100g
+      Classe_EMT = "Classe M2 : EMT = 15";     // Classe et EMT pour 100g
+    } else if (masse <= 250 && masse >= 150){
+      um = "± 0.29 g";    // incertitude de mesure pour 200g
+      Classe_EMT = "Classe M2 : EMT = 30";     // Classe et EMT pour 200g
+    }
+
+    msg_topic = String(masse_corrige, 2) + " " + um;
+    Serial.print("Masse corrigée : ");
+    Serial.println(msg_topic);
+    Serial.println(Classe_EMT);
+
+    client.publish(topic, msg_topic.c_str()); // publication de la masse + l'incertitude de mesure au topic 1
+    client.publish(topic_2, String(masse).c_str()); // publication de la masse au topic 2
+    client.publish(topic_3, Classe_EMT.c_str()); // publication de la classe et l'EMT de la masse au topic 3
+  }
 }
