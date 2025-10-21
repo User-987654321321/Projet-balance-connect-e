@@ -1,0 +1,174 @@
+#include <Arduino.h>
+#include "HX711.h"
+#include "PubSubClient.h"
+#include "WiFi.h"
+#include "esp_wpa2.h"
+
+// Connexions HX711
+
+#define DT  16   // Broche DT (data)
+
+#define SCK 17   // Broche SCK (clock)
+
+
+HX711 balance;
+
+
+// Facteur trouvé à l’étalonnage
+
+float calibration_factor = -1175.31;  //  à remplacer par ta valeur trouvée
+float masse_corrige;
+
+// Exemple : ~ 1000 / lecture brute obtenue avec 1 kg étalon
+
+//const char *mqtt_broker = "broker.hivemq.com"; 
+const char *mqtt_broker = "147.94.219.57"; // Identifiant du broker (Adresse IP)
+const char *topic = "masse corrigée"; // Nom du topic sur lequel les données seront envoyés.
+const char *topic_2 = "masse brut"; // Nom du topic sur lequel les données seront envoyés. 
+const char *mqtt_username = ""; // Identifiant dans le cas d'une liaison sécurisée
+const char *mqtt_password = ""; // Mdp dans le cas d'une liaison sécurisée
+const int mqtt_port = 1883; // Port : 1883 dans le cas d'une liaison non sécurisée et 8883 dans le cas d'une liaison cryptée
+WiFiClient espClient; 
+PubSubClient client(espClient); 
+
+// Paramètres EDUROAM (A COMPLETER)
+#define EAP_IDENTITY "anis.remili@etu.univ-amu.fr"
+#define EAP_PASSWORD "Anis83600." //mot de passe EDUROAM
+#define EAP_USERNAME "anis.remili@etu.univ-amu.fr" 
+const char* ssid = "eduroam"; // eduroam SSID
+
+// Fonction réception du message MQTT 
+void callback(char *topic, byte *payload, unsigned int length) { 
+  Serial.print("Le message a été envoyé sur le topic : "); 
+  Serial.println(topic); 
+  Serial.print("Message:"); 
+  for (int i = 0; i < length; i++) { 
+    Serial.print((char) payload[i]); 
+  } 
+  Serial.println(); 
+  Serial.println("-----------------------"); 
+}
+
+
+void setup() {
+
+  Serial.begin(115200);
+
+  balance.begin(DT, SCK);
+
+
+  balance.set_scale(calibration_factor); // Applique le facteur d’échelle
+
+  balance.tare(); // Mise à zéro au démarrage
+
+
+  Serial.println("Balance prête !");
+
+  // Connexion au réseau EDUROAM 
+
+  WiFi.disconnect(true);
+  WiFi.begin(ssid, WPA2_AUTH_PEAP, EAP_IDENTITY, EAP_USERNAME, EAP_PASSWORD); 
+  
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(F("."));
+  }
+
+  Serial.println("");
+  Serial.println(F("L'ESP32 est connecté au WiFi !"));
+  
+// Connexion au broker MQTT  
+  
+  client.setServer(mqtt_broker, mqtt_port); 
+  client.setCallback(callback); 
+
+  while (!client.connected()) { 
+    String client_id = "esp32-client-"; 
+    client_id += String(WiFi.macAddress()); 
+    Serial.printf("La chaîne de mesure %s se connecte au broker MQTT", client_id.c_str()); 
+ 
+    if (client.connect(client_id.c_str(), mqtt_username, mqtt_password)) { 
+      Serial.println("La chaîne de mesure est connectée au broker."); 
+    } else { 
+      Serial.print("La chaîne de mesure n'a pas réussi à se connecter ... "); 
+      Serial.print(client.state()); 
+      delay(2000); 
+    } 
+  } 
+} 
+
+
+
+void loop() {
+
+  float masse = balance.get_units(10); // Moyenne sur 10 mesures
+  if (masse <= 0.09 && masse >= -0.09){
+    masse_corrige = 0;
+  }
+  if (masse <= 1.49 && masse >= 0.5){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.04 g");
+  }
+  if (masse <= 3.49 && masse >= 1.5){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.04 g");
+  }
+  if (masse <= 7.49 && masse >= 3.5){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.05 g");
+  }
+  if (masse <= 14.99 && masse >= 7.5){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.07 g");
+  }
+  if (masse <= 34.99 && masse >= 15){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.08 g");
+  }
+  if (masse <= 74.99 && masse >= 35){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.09 g");
+  }
+  if (masse <= 149.99 && masse >= 75){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.15 g");
+  }
+  if (masse <= 250 && masse >= 150){
+    masse_corrige = masse;
+    Serial.print("Masse corrigée : ");
+    Serial.print(masse_corrige, 2); // 2 décimales
+    Serial.println(" ± 0.29 g");
+  }
+  
+
+  Serial.print("Masse mesurée : ");
+  Serial.print(masse, 2); // 2 décimales
+  Serial.println(" g");
+
+  msg_topic = String(masse_corrige) + " ± 0.27";
+  client.publish(topic, msg_topic.c_str()); // Publication de la température sur le topic (envoi d'une chaîne de caractères)
+  client.subscribe(topic); // S'abonne au topic pour recevoir des messages
+  client.loop(); // Gère les messages MQTT (pour lire la valeur de la température sur le moniteur série de platformIO)
+  
+  client.publish(topic_2, String(masse).c_str()); // Publication de la température sur le topic (envoi d'une chaîne de caractères)
+  client.subscribe(topic_2); // S'abonne au topic pour recevoir des messages
+  client.loop(); // Gère les messages MQTT (pour lire la valeur de la température sur le moniteur série de platformIO)
+
+  balance.power_down();			        // met le CAN en veille
+  delay(1000);
+  balance.power_up();
+}
